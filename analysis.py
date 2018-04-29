@@ -1,16 +1,24 @@
-from _bin import *
-import re
-from sklearn.cluster import KMeans
-import KNN
-from kmeans import *
+from numpy import *
+import time
 import matplotlib.pyplot as plt
-import seaborn as sns; sns.set()  # for plot styling
-import numpy as np
+from sklearn.cluster import DBSCAN
 import h5py
+
+# for hierarchical
+from scipy.cluster.hierarchy import dendrogram, linkage
+from scipy.cluster.hierarchy import cophenet
+from scipy.spatial.distance import pdist
+
+# for KMeans
+from sklearn.cluster import KMeans
+
+# Pay attention to this
+# from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
 
 
 def read_h5py(bin_idx=0):
-    h5 = h5py.File("bin"+bin_idx+".hdf5", mode="r+")
+    h5 = h5py.File("bin"+str(bin_idx)+".hdf5", mode="r+")
     _, col_spec = h5["spec_data"].shape
     _, col_summary = h5["summary_data"].shape
     spec_data = h5["spec_data"][:, 0:col_spec].copy()
@@ -33,11 +41,8 @@ spec_data, summary_data = read_h5py(bin_idx=0)
 spec_trans = adaptive_PCA(np.delete(spec_data, 1, 1))
 summary_trans = adaptive_PCA(summary_data)
 
-# k-means
-centroids_spec, clusterAssment_spec = kmeans(spec_trans, 20)
-centroids_summary, clusterAssment_summary = kmeans(summary_trans, 10)
 
-
+# make PCA plots
 """
 for i, em_line in enumerate(emission_lines):
     rst_list = []
@@ -67,5 +72,94 @@ temp1.replace(0, np.nan)
 
 """
 
+
+def generate_cluster(data, method="DBSCAN"):
+    """
+    not sure if we want to normalize or standardize on the
+    photometrics side though.
+    DBSCAN implementation here.
+    This function generate the cluster in each bin
+    based on the photometrics feature.
+    reference:
+    http://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html
+    http://www.aaai.org/Papers/KDD/1996/KDD96-037.pdf
+    """
+
+    # visualization problem
+    if method == "DBSCAN":
+        dbscan_cluster = DBSCAN()
+        db = DBSCAN(eps=0.3, min_samples=3).fit(data)
+        core_samples_mask = np.zeros_like(db.labels_, dtype=bool)
+        core_samples_mask[db.core_sample_indices_] = True
+        labels = db.labels_
+        n_clusters_ = len(set(labels)) - (1 if -1 in labels else 0)
+
+        unique_labels = set(labels.flatten())
+        colors = [plt.cm.Spectral(each)
+                  for each in np.linspace(0, 1, len(unique_labels))]
+        for k, col in zip(unique_labels, colors):
+            if k == -1:
+                # Black used for noise.
+                col = [0, 0, 0, 1]
+
+            class_member_mask = (labels == k)
+
+            xy = data[class_member_mask & core_samples_mask]
+            plt.plot(xy[:, 1], xy[:, 2], 'o', markerfacecolor=tuple(col),
+                     markeredgecolor='k', markersize=14)
+
+            xy = data[class_member_mask & ~core_samples_mask]
+            plt.plot(xy[:, 1], xy[:, 2], 'o', markerfacecolor=tuple(col),
+                     markeredgecolor='k', markersize=6)
+
+        plt.title('Estimated number of clusters: %d' % n_clusters_)
+        plt.show()
+        return labels
+
+    if method == "hierarchical":
+        Z = linkage(data, 'ward')
+        # c, coph_dists = cophenet(Z, pdist(data))
+        plt.title('Hierarchical Clustering Dendrogram (truncated)')
+        plt.xlabel('sample index or (cluster size)')
+        plt.ylabel('distance')
+        dendrogram(
+            Z,
+            truncate_mode='lastp',  # show only the last p merged clusters
+            p=12,  # show only the last p merged clusters
+            leaf_rotation=90.,
+            leaf_font_size=12.,
+            show_contracted=True,  # to get a distribution impression in truncated branches
+        )
+        plt.show()
+
+    if method == "Kmeans":
+        # centroids, clusterAssement = kmeans(data, 50)
+        n_clusters = 50
+        estimator = KMeans(n_clusters)
+        estimator.fit(data)
+        label_pred = estimator.labels_
+        centroids = estimator.cluster_centers_
+        inertia = estimator.inertia_
+
+        unique_labels = set(label_pred.flatten())
+        colors = [plt.cm.Spectral(each)
+                  for each in np.linspace(0, 1, len(unique_labels))]
+
+        for k, col in zip(unique_labels, colors):
+            if k == -1:
+                # Black used for noise.
+                col = [0, 0, 0, 1]
+
+            class_member_mask = (label_pred == k)
+
+            xy = data[class_member_mask]
+            plt.plot(xy[:, 3], xy[:, 4], 'o', markerfacecolor=tuple(col),
+                     markeredgecolor='k', markersize=4)
+
+            plt.plot(centroids[:, 3], centroids[:, 4], 'o', markerfacecolor=tuple([0, 0, 0, 1]),
+                     markeredgecolor='k', markersize=6)
+
+        plt.title('Estimated number of clusters: %d' % n_clusters)
+        plt.show()
 
 
